@@ -1,0 +1,46 @@
+             RS2MS.DOC - Documentation for RS2MS.BAS
+
+RS2MS.BAS (originally named MYRS2MB) Version 1.0 was written by Ed Mahoney
+28 May 1983.  This program will convert a Radio Shack Model I or Model 3
+BASIC (or Disk BASIC) program to a Microsoft BASIC 5.1 program.
+
+REQUIREMENTS:
+
+1) Your computer that will be running the Microsoft program
+must be able to 'print at' specific locations on your screen.
+
+2) The Radio Shack program that is to be converted, must exist
+on disk and be stored in ASCII format.
+   a) This program must not have line numbers 1 or 2 (the conversion
+      process will place statements in these positions)
+   b) The statements in the Radio Shack program must not be extremely
+      long, say greater than 220 characters long. (The program will
+      expand each line.)
+   c) The Radio Shack Program should not have the following statements:
+      PEEK  POKE  SET(x,y)  RESET(x,y)  POINT(x,y).  (These statements
+      are machine dependent).  If these 5 statements are present, they
+      will be passed on to the MBASIC with a REM statement appended to
+      the end that warns you that you will have to do some additional
+      conversion (good luck!).
+
+3) FINAL WARNING: This is only version 1.0. This utility has not been
+extensivly tested.
+
+WHAT IT DOES:
+
+   1) converts the RND function to MBASIC standards
+   2) converts Radio Shack's CLS statement to a print code
+   3) converts Radio Shack's PRINT @ ##, to a printable code
+   4) 'pads' all statements with spaces which MBASIC requires (and Radio
+      Shack does not).
+   5) Identifies statements that are machine dependent (ex. PEEK or SET
+      with a warning at the end of the statement and provides a table of
+      the bad statements at the end of execution.
+
+INSTALLATION:
+
+The conversion process will make certain Radio Shack statements
+into printable 'escape codes'. You must know the two escape code
+sequences for your computer (or terminal):
+   1) clear the screen and home the cursor
+   2) print at a screen location (Row,Column)
