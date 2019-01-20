@@ -1,0 +1,49 @@
+Guide to using VT100 control codes with the RC2014
+
+See <http://www.termsys.demon.co.uk/vtansi.htm> for a reference for VT100 control codes.
+
+The main problem is in BASIC's number to string function.  If you have
+A=2
+And then do a 
+A$=STR$(A)
+You get " 2" instead of "2".  That extra space messes up the VT100 control codes.  So you have to do a little more work:
+5030 RO$=STR$(RO):RO$=RIGHT$(RO$,LEN(RO$)-1)
+5040 CO$=STR$(CO):CO$=RIGHT$(CO$,LEN(CO$)-1)
+And strip off that leading space.  Now the cursor position code works.
+5050 PRINT CHR$(27)+"["+RO$+";"+CO$+"H";
+
+Here's some example subroutines for BASIC:
+5000 REM CLEAR SCREEN
+5010 PRINT CHR$(27);"[2J": RETURN
+
+5020 REM Set cursor pos ro=row, co=col
+5030 RO$=STR$(RO):RO$=RIGHT$(RO$,LEN(RO$)-1)
+5040 CO$=STR$(CO):CO$=RIGHT$(CO$,LEN(CO$)-1)
+5050 PRINT CHR$(27)+"["+RO$+";"+CO$+"H";
+5070 RETURN
+
+5080 REM SET ATTRIBUTES A1=attribute, A2=Foreground color, A3=Background color
+5090 A1$=STR$(A1):A1$=RIGHT$(A1$,LEN(A1$)-1)
+5100 A2$=STR$(A2):A2$=RIGHT$(A2$,LEN(A2$)-1)
+5110 A3$=STR$(A3):A3$=RIGHT$(A3$,LEN(A3$)-1)
+5120 PRINT CHR$(27)+"["+A1$+";"+A2$+";"+A3$+"m";:RETURN
+
+5130 REM RESET ATTRIBUTES
+5140 PRINT CHR$(27)+"[0m";:RETURN
+
+So, if you wanted to position the cursor at the top left of the screen, you would do:
+10 RO=1:CO=1:GOSUB 5030:PRINT "TOP LEFT";
+
+Note that you should always use ";" with your PRINTs when doing this, otherwise BASIC will automatically move the cursor down one line.
+If you print something at the bottom of the screen, that will cause the screen to scroll and the top line will be gone.
+
+If you wanted to position the cursor at row 20, column 30, change the text color to white on red, you would do this:
+10 RO=20:CO=30:GOSUB 5030
+20 A1=2:A2=37:A3=41:GOSUB 5090:PRINT "White on Red";:GOSUB 5140:PRINT
+
+Note that if you don't GOSUB 5140 to reset the attributes, everything you PRINT after setting the attributes will be white text on red background.
+
+The VGA serial terminal kit <https://www.tindie.com/products/maccasoft/vga-serial-terminal-kit-for-rc2014/> supports color.
+See the photo included.
+
+TERM.BAS tests all the color attributes.  This is a good little program to see if your terminal supoorts the attributes you want.
