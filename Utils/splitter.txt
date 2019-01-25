@@ -1,0 +1,54 @@
+
+
+
+                                 SPLITTER.COM
+
+        A friend and I have attempted to exchange programs for some time, 
+        with  an occasional problem.  He has a Xerox and I have a Kaypro. 
+        With the Kaypro having MFDISK,  we could swap disks and move  the 
+        software  fairly easily.  The problem came when a very large file 
+        was to be moved.  MFDISK would only do a single side  disk,  even 
+        though  the Xerox uses double sided disks.  This limited the size 
+        of  the  file we could move (or resulted in some  rather  painful 
+        efforts to spilt the file into parts.) The result was the need to 
+        create a program to easily split the files apart.  Thus was  born 
+        SPLITTER.
+
+        SPLITTER  will allow you to split a file at any desired point  in 
+        the file.  The program will display some instructions at start up 
+        and ask for the file to be split. Any bad entries here will abort 
+        the  program  with  an error message.  Given a  good  file  name, 
+        SPLITTER will find the file and display the size in 128 byte disk 
+        records. You will then be asked for the split point. The point is 
+        after one of these 128 byte records. Any value from 1 to the file 
+        size may be entered. An invalid number will abort the program. If 
+        the  number  is  valid,  SPLITTER will copy  records  up  to  and 
+        including  the record number entered to a new file.  The filename 
+        will be filename.ext where ext is a numeric designation beginning 
+        with 001.  
+
+        Once  these  records  have been copied,  you will  be  asked  for 
+        another  split point.  All numbers now have meaning.  If a number 
+        greater  than the previous and less than the file size is  given, 
+        another  file is created with the next segment  of  records.  The 
+        file extent is increased to 002, 003, etc. This process continues 
+        until a number is entered that is not within this range.  If such 
+        a  number is entered,  the remainder of the source file is copied 
+        to another file with a sequentially increased file  extent.  Note 
+        that this last entry may be a simple RETURN.
+
+        To put the file back together, just use PIP:
+
+             >PIP newfile.dat=file.001,file.002,...
+
+        This  will  concatenate all the pieces back into a  single  large 
+        file.
+
+        I  have  found that SPLITTER is also useful for backing up  large 
+        files from a hard disk to floppies.  The file is split where  you 
+        want it and can easily be put back together.
+
+
+
+                                           Mike Nault
+                                           August 1984.

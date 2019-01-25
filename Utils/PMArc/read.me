@@ -1,0 +1,52 @@
+PMEXE,PMSFX,PMSET,PMCAT
+
+These are utilities for use with PMARC and PMEXT, a very effective
+CP/M archiver and extractor. Unfortunately, documentation for these
+programs was written in Kanji, which can only be read on MSX-2 or 2+
+computers which have a Kanji ROM. If you have one, you'll still have
+to translate it. Here are a few short notes on how to use the PM
+utilities, based on our experience.
+
+
+PMEXE
+
+This is a module which you can only use in combination with PMARC. It
+is used to make executable compressed COMfiles (just like LZEXE or
+PKLITE for MSDOS). To make such a file, type:
+
+	PMARC <archive>.COM=PMEXE2.COM <filename> [options]
+
+The archive-name must be .COM, offcourse, not .PMA.
+
+
+PMSFX
+
+This module is also for use with PMARC. It is used to make self-
+extracting (SFX) archives, like this:
+
+	PMARC <archive>.COM=PMSFX2.COM <filenames> [options]
+
+The archive-name must be .COM, not .PMA.
+
+
+PMSET
+
+This is a program with which you can set some default options in
+PMARC. Start up the program without arguments to get help.
+
+
+PMCAT
+
+
+This is a program with which you can update and catenate or delete
+files in PM- archives. Start up the program without arguments to
+get help.
+
+
+PMSET and PMCAT (just like PMEXT) will also work on .LZH archives
+made with the MSDOS archiver LHA 2.11, but don't count on LHA to
+be able to extract them afterwards.
+
+Pierre Gielen,
+Nijmegen/The Netherlands
+
