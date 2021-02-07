@@ -1,0 +1,114 @@
+Extra information on the usage of the PMArchive Suite of software
+
+In addition to the commands and options that can be gleaned from the 
+previous DOCs and usage summaries there are some VERY useful ones that 
+were missed.
+
+Firstly the PMARC & PMEXT programs both work on multiple files ie If 
+wild-cards are used in PMEXT then it will search ALL matching Archives 
+not just the first match it finds which I find very useful when you 
+set up one disk with many archives each dealing with one program 
+group.
+
+Also with PMEXT more devices are supported than has yet been revealed!
+with the usage:-
+PMEXT [D:]<filename><extension> {device:}<filematch>(options)
+where all parameters are optional.
+both D: and device: will use default drives if they are left out.
+In addition though the {device:} option can redirect file output to 
+other devices:-
+A: - P: to drives as usual
+LST: outputs to current list device (printer etc:) and if the /P 
+option is used form feeds will be sent at the PMSET intervals.
+PUN: outputs to the CPM2.2 Paper Punch device or whatever is driven by 
+that BIOS function with as far as I know no re-formating of the passed 
+data.
+CON: outputs to the console and if the /P(aginate) option is used the 
+there are a few quite unique functions that can be invoked by keyboard 
+input.
+After a screen full of text you can press Enter/Return A, B, Q, X or 
+Space. 
+Each performs a specific function and are read from the console 
+buffer.
+Enter/Return - clears the screen and displays the next screen-full.
+A - Aborts this file listing.
+B - Goes Back one Page. (can only go back as far as the first page in 
+current block)
+Q - Quits the Read function and exits to CCP prompt.
+X - Displays one line at a time.
+Space - Displays the next screen-full without clearing the screen. 
+
+An example command line could look like this:-
+A> PMEXT B:* CON:*.DOC/I/P
+
+Which would load PMEXT from drive A, and search drive B for all files 
+that matched ????????.PMA and when it finds one it searches the 
+directory for a DOC file and dosn't display non-matches when it finds 
+one it will extract it to the console with pagination and you can then 
+use the above keys to view the DOC. If you abort with A key or reach 
+the end of text and press Enter the search for the next DOC file 
+resumes, and the process continues until either the last archive has 
+been searched or the search is aborted by the Q key during reading.
+I personaly find this to be a very good text viewer in its own right.
+
+EXE: Will decompress the given .COM file into TPA and execute it in 
+much the same way as the LRUN.COM utility does for the .LBR format and 
+a command line can be passed to the file in the normal cpm way.
+
+A short note on the compression ratios that I have achieved and 
+compared against various Archivers for both CPM and MS-DOS and also 
+stand-alone compressors.
+
+Firstly this may be difficult to believe but PMARC beats the ms-dos LHA 
+archiver which, so I gather is were the inspiration for PMARC came 
+from. It also beats the ms-dos ARC format archiver and PKZIP1xx though 
+I don't think it beats the new version 2 alogarithms.
+Obviosly it beats the CPM ARK archiver hands down on both compression 
+and facilities and does all that the .LBR format can with just the two 
+main PMARC & PMEXT files. It beats all the stand-alone compressors 
+including CRLZH20.COM which as far as I know was previosly the best 
+one for CPM.
+There is only one existing archiver that I know of that beats the PMA 
+alogarithms for sure and that is MS-DOSs ARJ archiver though it's not 
+by much! with an XRS mail packet which consists of a number of 
+different files the ratios achieved only differed on average by 2.5% 
+in favor of ARJ which considering the speed of extraction with UNARJ  
+and that of the PMEXT that small diference in ratios definately shows 
+that the whole suite is very well coded and alot of thought went into 
+its design.
+
+I downloaded this suite in two parts from aspects BBS manchester and 
+decided to repack them in the one selfextracting COM file in order to 
+make it easier to transport the whole package! If you are reading this 
+from the original format then obviously it'll work on your system if 
+you received this as an ARK or LBR it wasn't my doing and you'll have 
+to test and make sure that you're using a Z80 or better based machine 
+with at least as much TPA as shown in the command Sumaries header.
+
+If you wish to pass this on to anyone PLEASE keep it in this 
+self-extracting form as it is the smallest form that has the widest 
+compatability with most CPM machines.
+It can be treated just like any other PMA archive and files can be 
+added to it if they are considered nesesary.
+
+The biggest flaw with this suite is that it does not support du: 
+specifiers. I suppose that some of those who realy nead them could 
+possibly hack a fix but if they do then it'd be a good idea to change 
+the z80 specific instruction DJNZ dis. used throughout this suite to:
+DEC B
+JR NZ,dis
+which would then make it usable on old 8080 systems and on the V20 
+series in 8080 mode.
+
+Note the High speed mode option in PMARC may be faster but it 
+definately reduces the amount of compression obtained.
+Also when creating a PMEXE type archive remember that there must be 
+enough TPA to allow both the existing archive and the expanded form to 
+exist in otherwise it will jam up!
+
+At this moment in time there is no ms-dos method of extracting PMA 
+type archives. The closest thing they have is the LZH archive and 
+although PMEXT will extract files from those the oposite will not work 
+yet, maybe they'll catch up one day. <grin>
+
+PMAUTOAE.COM with this DOC was compiled by Johnathan Taylor 06/02/93

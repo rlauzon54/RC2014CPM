@@ -1,0 +1,395 @@
+                ;
+                ;			DIRS.ASM
+                ;		     REVISED 10/1/80
+                ;
+                ;		SORTED DIRECTORY PROGRAM
+                ;		BY KEITH PETERSEN, W8SDZ
+                ;
+                ;DISPLAY FORMAT IS SAME AS CP/M 2.X DIR, EXCEPT IS SORTED
+                ;ALPHABETICALLY. SUGGESTED AS A REPLACEMENT FOR THE "DIR"
+                ;COMMAND IN CP/M-2. PRESENT VERSION ALLOWS MAX. OF 256 NAMES.
+                ;
+                ;PRINTS A 4-WIDE DIRECTORY, SORTED ALPHABETICALLY.
+                ;COMPATIBLE WITH CP/M 1.4 AND 2.X. IGNORES "SYS" FILES.
+                ;
+                ;BASED ON 'FMAP' BY WARD CHRISTENSEN.
+                ;
+                ;DIRS FILENAME.FILETYPE OR JUST DIRS
+                ;
+                ;ALLOWS '*' OR '?' TYPE SPECIFICATIONS
+                ;DRIVE NAME BY ALSO BE SPECIFIED
+                ;
+                ; 09/07/80 - MODIFIED TO ASSEMBLE WITH RMAC AND EXTERNALIZED
+                ;		PAGE 0 FOR USE WITH MP/M.  (MUST BE LINKED
+                ;		WITH PG0EQU.ASM)
+                ;	     ALSO MODIFIED TO ALLOW (VIA CONDITIONAL ASSEMBLY)
+                ;		'S' OPTION TO DISPLAY SYSTEM FILES.
+                ;	     (BY BRUCE R. RATOFF)
+                ; 09/08/80 - CHKUSR CONDITIONAL ASSEMBLY ADDED TO FORCE MATCH OF
+                ;		CURRENT USER NUMBER, AS REQUIRED IN MP/M TO
+                ;		PREVENT USER 0 FILES FROM SHOWING UP IN ALL
+                ;		AREAS.  ALSO USED IN CP/M 2.2 SYSTEMS CONTAINING
+                ;		BDOSPAT.  (BRR)
+                ; 10/01/80 - SAY 'FILE NOT FOUND.' INSTEAD OF 'NO FILE' AND
+                ;		DISPLAY USER NUMBER HEADING IF CHKUSR ENABLED.
+                ;		TAKE 'NO FILE' PATH IF FIRST SEARCH SUCCEEDS,
+                ;		BUT NOTHING QUALIFIES FOR THE SORT.
+                ;		(BRR)
+                ;
+                ;
+ 0000 =         FALSE	EQU	0		;DEFINE LOGICAL FALSE
+ FFFF =         TRUE	EQU	NOT FALSE	;DEFINE LOGICAL TRUE
+                ;
+ 0000 =         ALTCPM	EQU	FALSE	;PUT TRUE HERE FOR H8 OR TRS-80
+ 0000 =         RMAC	EQU	FALSE	;PUT TRUE HERE FOR ASSEMBLY BY RMAC
+ 0000 =         SOPT	EQU	FALSE	;PUT TRUE TO ALLOW 'DIR *.* S' FORM
+ 0000 =         CHKUSR	EQU	FALSE	;PUT TRUE IF USER # MATCH REQUIRED
+                ;
+                	IF	ALTCPM
+                BASE	EQU	4200H
+                TPA	EQU	4300H
+                	ENDIF
+                	IF	RMAC
+                	EXTRN	BASE,FCB,BDOS	;MAKE BASE EXTERNAL
+                	ENDIF
+                	IF	(NOT ALTCPM) AND (NOT RMAC)
+ 0000 =         BASE	EQU	$	;WILL DEFAULT TO 0 (OR 100H WITH MAC +R OPTION)
+ 0100 =         TPA	EQU	100H
+                	ENDIF
+                ;
+                	IF	NOT RMAC
+ 005C =         FCB	EQU	BASE+5CH
+ 0005 =         BDOS	EQU	BASE+5
+                	ENDIF
+                ;
+ 0004 =         NPL	EQU	4	;NUMBER OF NAMES PER LINE
+ 003A =         DELIM	EQU	':'	;FENCE (DELIMITER) CHARACTER
+                ;
+                	IF	NOT RMAC
+ 0100           	ORG	TPA
+                	ENDIF
+                ;
+                ;SAVE THE STACK
+ 0100 210000    START	LXI	H,0
+ 0103 39        	DAD	SP	;H=STACK
+ 0104 22D104    	SHLD	STACK	;SAVE IT
+ 0107 31D104    	LXI	SP,STACK ;GET NEW STACK
+                ;
+                	IF	SOPT
+                	LDA	FCB+17	;SAVE S OPTION FLAG
+                	STA	SOPFLG	;(BLANK OR LETTER S)
+                	ENDIF
+                ;
+                	IF	CHKUSR
+                	MVI	E,0FFH
+                	MVI	C,CURUSR	;INTERROGATE USER NUMBER
+                	CALL	BDOS
+                	STA	USERNO
+                	LXI	D,USRMSG	;DISPLAY IT
+                	MVI	C,PRINT
+                	CALL	BDOS
+                	LDA	USERNO
+                	CPI	10
+                	JC	DUX
+                	MVI	A,'1'
+                	CALL	TYPE
+                	LDA	USERNO
+                	SUI	10
+                DUX	ADI	'0'
+                	CALL	TYPE
+                	LXI	D,USRMS2
+                	MVI	C,PRINT
+                	CALL	BDOS
+                	ENDIF
+                ;
+ 010A 215C00    	LXI	H,FCB
+ 010D 7E        	MOV	A,M	;GET DRIVE NAME
+ 010E B7        	ORA	A	;ANY SPECIFIED?
+ 010F C21801    	JNZ	START2	;YES SKIP NEXT ROUTINE
+ 0112 0E19      	MVI	C,CURDSK
+ 0114 CD0500    	CALL	BDOS	;GET CURRENT DISK NR
+ 0117 3C        	INR	A	;MAKE A:=1
+                ;
+ 0118 C640      START2	ADI	'A'-1	;MAKE IT PRINTABLE
+ 011A 32D504    	STA	DRNAM	;SAVE FOR LATER
+ 011D 215D00    	LXI	H,FCB+1	;POINT TO NAME
+ 0120 7E        	MOV	A,M	;ANY SPECIFIED?
+ 0121 FE20      	CPI	' '
+ 0123 C22F01    	JNZ	GOTFCB
+                ;NO FCB - MAKE FCB ALL '?'
+ 0126 060B      	MVI	B,11	;FN+FT COUNT
+ 0128 363F      QLOOP	MVI	M,'?'	;STORE '?' IN FCB
+ 012A 23        	INX	H
+ 012B 05        	DCR	B
+ 012C C22801    	JNZ	QLOOP
+                ;LOOK UP THE FCB IN THE DIRECTORY
+ 012F 0E11      GOTFCB	MVI	C,FSRCHF ;GET 'SEARCH FIRST' FNC
+ 0131 115C00    	LXI	D,FCB
+ 0134 CD0500    	CALL	BDOS	;READ FIRST
+ 0137 3C        	INR	A	;WERE THERE ANY?
+ 0138 C25201    	JNZ	SOME	;GOT SOME
+ 013B CD7E02    NONE	CALL	ERXIT
+                	IF	NOT CHKUSR
+ 013E 4E4F204649	DB	'NO FILE$'
+                	ENDIF
+                	IF	CHKUSR
+                	DB	'File not found.$'
+                ;
+                USRMSG	DB	'Directory for user $'
+                USRMS2	DB	':',13,10,'$'
+                	ENDIF
+                ;
+                ;READ MORE DIRECTORY ENTRIES
+ 0146 0E12      MOREDIR	MVI	C,FSRCHN ;SEARCH NEXT
+ 0148 115C00    	LXI	D,FCB
+ 014B CD0500    	CALL	BDOS	;READ DIR ENTRY
+ 014E 3C        	INR	A	;CHECK FOR END (0FFH)
+ 014F CA8801    	JZ	SPRINT	;NO MORE - SORT & PRINT
+                ;POINT TO DIRECTORY ENTRY 
+ 0152 3D        SOME	DCR	A	;UNDO PREV 'INR A'
+ 0153 E603      	ANI	3	;MAKE MODULUS 4
+ 0155 87        	ADD	A	;MULTIPLY...
+ 0156 87        	ADD	A	;..BY 32 BECAUSE
+ 0157 87        	ADD	A	;..EACH DIRECTORY
+ 0158 87        	ADD	A	;..ENTRY IS 32
+ 0159 87        	ADD	A	;..BYTES LONG
+ 015A 218100    	LXI	H,BASE+81H ;POINT TO BUFFER
+                			;(SKIP TO FN/FT)
+ 015D 85        	ADD	L	;POINT TO ENTRY
+ 015E C609      	ADI	9	;POINT TO SYS BYTE
+ 0160 6F        	MOV	L,A	;SAVE (CAN'T CARRY TO H)
+                ;
+                	IF	SOPT
+                	LDA	SOPFLG	;DID USER REQUEST SYS FILES?
+                	CPI	'S'
+                	JZ	SYSFOK
+                	ENDIF
+                ;
+ 0161 7E        	MOV	A,M	;GET SYS BYTE
+ 0162 E680      	ANI	80H	;CHECK BIT 7
+ 0164 C24601    	JNZ	MOREDIR	;SKIP THAT FILE
+ 0167 7D        SYSFOK	MOV	A,L	;GO BACK NOW
+ 0168 D609      	SUI	9	;BACK TO FT/FN START
+ 016A 6F        	MOV	L,A	;HL POINTS TO ENTRY NOW
+                ;
+                	IF	CHKUSR
+                	DCX	H	;POINT TO USER BYTE IN FCB
+                	LDA	USERNO	;GET CURRENT USER
+                	CMP	M
+                	JNZ	MOREDIR	;IGNORE IF DIFFERENT
+                	INX	H
+                	ENDIF
+                ;
+                ;MOVE ENTRY TO TABLE
+ 016B EB        	XCHG		;ENTRY TO DE
+ 016C 2A8E02    	LHLD	NEXTT	;NEXT TABLE ENTRY TO HL
+ 016F 060B      	MVI	B,11	;ENTRY LENGTH
+ 0171 1A        TMOVE	LDAX	D	;GET ENTRY CHAR
+ 0172 E67F      	ANI	7FH	;REMOVE ATTRIBUTES
+ 0174 77        	MOV	M,A	;STORE IN TABLE
+ 0175 13        	INX	D
+ 0176 23        	INX	H
+ 0177 05        	DCR	B	;MORE?
+ 0178 C27101    	JNZ	TMOVE
+ 017B 228E02    	SHLD	NEXTT	;SAVE UPDATED TABLE ADDR
+ 017E 3A9002    	LDA	COUNT	;GET PREV COUNT
+ 0181 3C        	INR	A
+ 0182 329002    	STA	COUNT
+ 0185 C34601    	JMP	MOREDIR
+                ;
+                ;SORT AND PRINT
+ 0188 3A9002    SPRINT	LDA	COUNT	;GET FILE NAME COUNT
+ 018B B7        	ORA	A	;ANY FOUND?
+ 018C CA3B01    	JZ	NONE	;NO, EXIT
+                ;INIT THE ORDER TABLE
+ 018F 219502    	LXI	H,ORDER
+ 0192 11D704    	LXI	D,TABLE
+ 0195 010B00    	LXI	B,11	;ENTRY LENGTH
+ 0198 73        BLDORD	MOV	M,E	;SAVE LO ORD ADDR
+ 0199 23        	INX	H
+ 019A 72        	MOV	M,D	;SAVE HI ORD ADDR
+ 019B 23        	INX	H
+ 019C EB        	XCHG		;TABLE ADDR TO HL
+ 019D 09        	DAD	B	;POINT TO NEXT ENTRY
+ 019E EB        	XCHG
+ 019F 3D        	DCR	A	;MORE?
+ 01A0 C29801    	JNZ	BLDORD	;..YES
+ 01A3 3A9002    	LDA	COUNT	;GET COUNT
+ 01A6 329102    	STA	SCOUNT	;SAVE AS # TO SORT
+ 01A9 3D        	DCR	A	;ONLY 1 ENTRY?
+ 01AA CADA01    	JZ	DONE	;..YES, SO SKIP SORT
+ 01AD AF        SORT	XRA	A	;GET A ZERO
+ 01AE 329202    	STA	SWITCH	;SHOW NONE SWITCHED
+ 01B1 3A9102    	LDA	SCOUNT	;GET COUNT
+ 01B4 3D        	DCR	A	;USE 1 LESS
+ 01B5 32D604    	STA	TEMP	;SAVE # TO COMPARE
+ 01B8 329102    	STA	SCOUNT	;SAVE HIGHEST ENTRY
+ 01BB CADA01    	JZ	DONE	;EXIT IF NO MORE
+ 01BE 219502    	LXI	H,ORDER ;POINT TO ORDER TABLE
+ 01C1 CD5802    SORTLP	CALL	COMPR	;COMPARE 2 ENTRIES
+ 01C4 FC6A02    	CM	SWAP	;SWAP IF NOT IN ORDER
+ 01C7 23        	INX	H	;BUMP ORDER
+ 01C8 23        	INX	H	;..TABLE POINTER
+ 01C9 3AD604    	LDA	TEMP	;GET COUNT
+ 01CC 3D        	DCR	A
+ 01CD 32D604    	STA	TEMP
+ 01D0 C2C101    	JNZ	SORTLP	;CONTINUE
+                ;ONE PASS OF SORT DONE
+ 01D3 3A9202    	LDA	SWITCH	;ANY SWAPS DONE?
+ 01D6 B7        	ORA	A
+ 01D7 C2AD01    	JNZ	SORT
+                ;SORT IS ALL DONE - PRINT ENTRIES
+ 01DA 219502    DONE	LXI	H,ORDER
+ 01DD 228E02    	SHLD	NEXTT
+                ;
+                ;PRINT AN ENTRY
+ 01E0 CD2402    	CALL	DRPRNT	;PRINT DRIVE NAME
+ 01E3 0E04      	MVI	C,NPL	;NR. OF NAMES PER LINE
+ 01E5 C5        ENTRY:	PUSH	B
+ 01E6 0E0B      	MVI	C,CONST	;CK STATUS OF KB
+ 01E8 CD0500    	CALL	BDOS	;ANY KEY PRESSED?
+ 01EB C1        	POP	B
+ 01EC B7        	ORA	A
+ 01ED C28402    	JNZ	ABORT	;YES, ABORT
+ 01F0 CD2A02    	CALL	FENCE	;PRINT FENCE CHAR AND SPACE
+ 01F3 2A8E02    	LHLD	NEXTT	;GET ORDER TABLE POINTER
+ 01F6 5E        	MOV	E,M	;GET LO ADDR
+ 01F7 23        	INX	H
+ 01F8 56        	MOV	D,M	;GET HI ADDR
+ 01F9 23        	INX	H
+ 01FA 228E02    	SHLD	NEXTT	;SAVE UPDATED TABLE POINTER
+ 01FD EB        	XCHG		;TABLE ENTRY TO HL
+ 01FE 0608      	MVI	B,8	;FILE NAME LENGTH
+ 0200 CD3E02    	CALL	TYPEIT	;TYPE FILENAME
+ 0203 CD1F02    	CALL	PERIOD	;PERIOD AFTER FN
+ 0206 0603      	MVI	B,3	;GET THE FILETYPE
+ 0208 CD3E02    	CALL	TYPEIT
+ 020B CD2F02    	CALL	SPACE	;SPACE OVER ONE
+                ;SEE IF MORE ENTRIES
+ 020E 3A9002    	LDA	COUNT
+ 0211 3D        	DCR	A
+ 0212 CA8902    	JZ	EXIT
+ 0215 329002    	STA	COUNT
+ 0218 0D        	DCR	C	;ONE LESS ON THIS LINE
+ 0219 CC4802    	CZ	CRLF	;PRINT CR-LF AND DRIVE NAME
+ 021C C3E501    	JMP	ENTRY
+                ;
+ 021F 3E2E      PERIOD	MVI	A,'.'
+ 0221 C33102    	JMP	TYPE
+                ;
+ 0224 3AD504    DRPRNT	LDA	DRNAM	;GET SAVED DRIVE NAME
+ 0227 C33102    	JMP	TYPE	;PRINT IT
+                ;
+ 022A 3E3A      FENCE	MVI	A,DELIM	;FENCE CHARACTER
+ 022C CD3102    	CALL	TYPE	;PRINT IT, FALL INTO SPACE
+                ;
+ 022F 3E20      SPACE	MVI	A,' '
+                ;
+                ;TYPE CHAR IN A
+ 0231 C5        TYPE	PUSH	B
+ 0232 D5        	PUSH	D
+ 0233 E5        	PUSH	H
+ 0234 5F        	MOV	E,A
+ 0235 0E02      	MVI	C,WRCHR
+ 0237 CD0500    	CALL	BDOS
+ 023A E1        	POP	H
+ 023B D1        	POP 	D
+ 023C C1        	POP	B
+ 023D C9        	RET
+                ;
+ 023E 7E        TYPEIT	MOV	A,M
+ 023F CD3102    	CALL	TYPE
+ 0242 23        	INX	H
+ 0243 05        	DCR	B
+ 0244 C23E02    	JNZ	TYPEIT
+ 0247 C9        	RET
+                ;
+ 0248 3E0D      CRLF	MVI	A,13	;PRINT
+ 024A CD3102    	CALL	TYPE
+ 024D 3E0A      	MVI	A,10	;LF
+ 024F CD3102    	CALL	TYPE
+ 0252 CD2402    	CALL	DRPRNT
+ 0255 0E04      	MVI	C,NPL	;NUMBER OF NAMES PER LINE
+ 0257 C9        	RET
+                ;
+                ;COMPARE ROUTINE FOR SORT
+ 0258 E5        COMPR	PUSH	H	;SAVE TABLE ADDR
+ 0259 5E        	MOV	E,M	;LOAD LO
+ 025A 23        	INX	H
+ 025B 56        	MOV	D,M	;LOAD HI
+ 025C 23        	INX	H
+ 025D 4E        	MOV	C,M
+ 025E 23        	INX	H
+ 025F 46        	MOV	B,M
+                ;BC, DE NOW POINT TO ENTRIES TO BE COMPARED
+ 0260 EB        	XCHG
+ 0261 0A        CMPLP	LDAX	B
+ 0262 BE        	CMP	M
+ 0263 23        	INX	H
+ 0264 03        	INX	B
+ 0265 CA6102    	JZ	CMPLP
+ 0268 E1        	POP	H
+ 0269 C9        	RET		;COND CODE TELLS ALL
+                ;
+                ;SWAP ENTRIES IN THE ORDER TABLE
+ 026A 3E01      SWAP	MVI	A,1
+ 026C 329202    	STA	SWITCH	;SHOW A SWAP WAS MADE
+ 026F 4E        	MOV	C,M
+ 0270 23        	INX	H
+ 0271 E5        	PUSH	H	;SAVE TABLE ADDR+1
+ 0272 46        	MOV	B,M
+ 0273 23        	INX	H
+ 0274 5E        	MOV	E,M
+ 0275 71        	MOV	M,C
+ 0276 23        	INX	H
+ 0277 56        	MOV	D,M
+ 0278 70        	MOV	M,B
+ 0279 E1        	POP	H
+ 027A 72        	MOV	M,D
+ 027B 2B        	DCX	H	;BACK POINTER TO CORRECT LOC'N
+ 027C 73        	MOV	M,E
+ 027D C9        	RET
+                ;
+                ;ERROR EXIT
+ 027E D1        ERXIT	POP	D	;GET MSG
+ 027F 0E09      	MVI	C,PRINT
+ 0281 C38602    	JMP	CALLB	;PRINT MSG, EXIT
+                ;
+                ;ABORT - READ CHAR ENTERED
+ 0284 0E01      ABORT	MVI	C,RDCHR
+ 0286 CD0500    CALLB	CALL	BDOS	;DELETE THE CHAR
+                ;
+                ;FALL INTO EXIT
+                ;EXIT - ALL DONE , RESTORE STACK
+ 0289 2AD104    EXIT	LHLD	STACK	;GET OLD STACK
+ 028C F9        	SPHL		;MOVE TO STACK
+ 028D C9        	RET		;..AND RETURN
+                ;
+ 028E D704      NEXTT	DW	TABLE	;NEXT TABLE ENTRY
+ 0290 00        COUNT	DB	0	;ENTRY COUNT
+ 0291 00        SCOUNT	DB	0	;# TO SORT
+ 0292 00        SWITCH	DB	0	;SWAP SWITCH FOR SORT
+ 0293 8000      BUFAD	DW	BASE+80H ;OUTPUT ADDR
+ 0295           ORDER	DS	512	;ORDER TABLE (ROOM FOR 256 NAMES)
+ 0495           	DS	60	;STACK AREA
+ 04D1           STACK	DS	2	;SAVE OLD STACK HERE
+ 04D3           SOPFLG	DS	1	;SET TO 'S' TO ALLOW SYS FILES TO PRINT
+ 04D4           USERNO	DS	1	;CONTAINS CURRENT USER NUMBER
+ 04D5           DRNAM	DS	1	;SAVE DRIVE NAME HERE
+ 04D6           TEMP	DS	1	;SAVE DIR ENTRY
+ 04D7 =         TABLE	EQU	$	;READ ENTRIES IN HERE
+                ;
+                ; BDOS EQUATES
+                ;
+ 0001 =         RDCHR	EQU	1	;READ CHAR FROM CONSOLE
+ 0002 =         WRCHR	EQU	2	;WRITE CHR TO CONSOLE
+ 0009 =         PRINT	EQU	9	;PRINT CONSOLE BUFF
+ 000B =         CONST	EQU	11	;CHECK CONS STAT
+ 000F =         FOPEN	EQU	15	;0FFH=NOT FOUND
+ 0010 =         FCLOSE	EQU	16	;   "	"
+ 0011 =         FSRCHF	EQU	17	;   "	"
+ 0012 =         FSRCHN	EQU	18	;   "	"
+ 0019 =         CURDSK	EQU	25	;GET CURRENTLY LOGGED DISK NAME
+ 0020 =         CURUSR	EQU	32	;GET CURRENTLY LOGGED USER NUMBER (2.X ONLY)
+                ;
+ 04D7           	END

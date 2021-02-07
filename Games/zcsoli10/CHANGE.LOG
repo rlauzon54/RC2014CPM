@@ -1,0 +1,50 @@
+2020-11-25  Russell Marks  <zgedneil@gmail.com>
+
+	* Version 1.0.
+
+	* readme.txt: updated to reflect the changed filenames.
+
+	* Changed filenames to all-lowercase, aside from ChangeLog which
+	is renamed to/from change.log by "make zip". This is to cope with
+	CP/M unzip not uppercasing filenames, by using "zip -k" to make a
+	DOS-style one with uppercase names. The idea is that on Unix you
+	would extract the zip with "unzip -L" to get lowercase filenames
+	back, though this only really matters if you're rebuilding the
+	game.
+
+2020-11-24  Russell Marks  <zgedneil@gmail.com>
+
+	* zcsoli.z: added a simple usage message if 1st or 2nd char on
+	command-line is "?" or "h". Removed "shuffling" message, which you
+	barely even got to actually see with it being so much faster in
+	this version, so on Z80 the COM still fits in 2k. Just. :-)
+
+	* zcsoli.z: no longer displays the onscreen instructions on a
+	custom terminal type if cols setting is less than 50, making 32
+	columns now the minimum required width. You can also do this with
+	the builtin terminal types by adding "-" as a second character,
+	e.g. "zcsoli 2-". The latter might be useful e.g. in 40-column
+	mode on an MSX.
+
+2020-11-23  Russell Marks  <zgedneil@gmail.com>
+
+	* z8080.awk: fixed a very obvious bug in "sra" replacement, though
+	that's not actually used by zcsoli.
+
+2020-11-22  Russell Marks  <zgedneil@gmail.com>
+
+	* zcsoli.z: added ^L to redraw the screen. Also fixed input bug -
+	I hadn't spotted that I was mixing direct and non-direct input,
+	which was causing strange behaviour on some systems.
+
+2020-11-21  Russell Marks  <zgedneil@gmail.com>
+
+	* zcsoli.z: added ADM-3A support, as this seems to cover quite
+	a few systems/terminals. (It is, of course, entirely
+	coincidental that I needed this to play it in Virtual Kaypro.)
+
+2020-11-20  Russell Marks  <zgedneil@gmail.com>
+
+	* CP/M version based on soliyawn, but it's 2k rather than the
+	original's 1k. The 8080 version is actually over 2k! Hopefully you
+	can spare the disk space. :-)

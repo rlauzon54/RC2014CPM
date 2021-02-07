@@ -1,0 +1,6 @@
+This is a test.
+This seems just like edlin in DOS.
+Is that unexpected?
+This is a test.
+This seems just like edlin in DOS.
+Is that unexpected?

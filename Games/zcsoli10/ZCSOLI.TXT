@@ -1,0 +1,228 @@
+zcsoli 1.0 - Solitaire/Patience/Klondike card game for CP/M.
+Copyright (C) 2020 Russell Marks.
+Based on my 2002 Minigame Competition entry for the Sinclair Spectrum.
+
+This program is free software; you can redistribute it and/or modify
+it under the terms of the GNU General Public License as published by
+the Free Software Foundation; either version 2 of the License, or (at
+your option) any later version.
+
+This program is distributed in the hope that it will be useful, but
+WITHOUT ANY WARRANTY; without even the implied warranty of
+MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+General Public License for more details.
+
+You should have received a copy of the GNU General Public License
+along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+[The GPL is in COPYING.]
+
+
+About Text Formats Used
+-----------------------
+
+This file is in CP/M text format, with CR/LF line endings and ^Z for
+EOF. Other text files here are in Unix text format, with LF-only line
+endings and no EOF marker. Please bear that in mind, on CP/M in
+particular. :-)
+
+
+Description
+-----------
+
+zcsoli is a one-player card game, playing the game usually called
+Solitaire, Patience, or Klondike. It uses the (easier) 1-card draw
+variant. It supports VT100, VT52, ADM-3A, and ZCN control codes.
+
+There are two versions. zcsoli.com requires a Z80 or compatible CPU.
+zcso8080.com uses 8080 instructions only (and should run on anything
+CP/M 2.2 does), but it's slower and larger.
+
+The aim of the game is to get all the cards in each suit onto the
+matching ace pile, in ascending order (with aces low) from ace to
+king. To help you do this, you can move cards onto/between the seven
+main runs of cards which are dealt when you start. Any face-up cards
+on those must be in descending order (K, Q, J, 10, ... 2), and have
+alternating red/black suit. When moving cards between the main
+"piles", you can only move entire runs (every face-up card on the
+pile). When moving to a main pile which has no cards at all, you can
+only move a king there (or the top card of the run you're moving must
+be a king).
+
+The main card piles are shown at the top of the screen (growing
+downwards), with the deck at the bottom-left and the ace piles to the
+right of that. (Initially you can't see the ace piles, as you have to
+move an ace to them before there'll be anything there.)
+
+The top of each card is indicated with two characters, the first being
+a number or A/T/J/Q/K for ace/ten/jack/queen/king, the second being
+H/D/s/c for hearts/diamonds/spades/clubs. While no colour is used in
+the display, runs of cards can easily be found just using the
+uppercase/lowercase display of the different suits.
+
+
+Controls
+--------
+
+When the game runs, it initially prompts you to press a key to
+continue. This is to help set up the random number generator.
+
+Once the game starts, the keys are:
+
+Enter (CR) - turn over a card from the top of the deck. If the deck is
+empty, it flips the turned-over cards back onto the deck first.
+
+1 to 7, or D - pick a card (or run) to move from the numbered pile or
+the deck (actually the topmost turned-over card). Once you've pressed
+this first key, you then choose where to move it, with 1 to 7 and A
+meaning either the numbered pile, or the relevant ace pile. If you
+attempt a move which isn't allowed, it'll be ignored.
+
+Control-R - restart, abandoning the current game, and reshuffle/deal
+from scratch.
+
+Control-L - redraw the screen.
+
+Control-C - exit the game.
+
+If you win, you get a congratulatory message - press a key at that
+point to start another game.
+
+
+Terminal Support
+----------------
+
+By default, zcsoli.com expects a VT100/ANSI terminal. But you can
+specify a builtin terminal type to use by running it with "zcsoli n"
+where n is:
+
+0  custom terminal as patched-in
+1  VT100
+2  VT52
+3  ZCN
+4  VC404
+5  ADM-3A
+
+Many systems/terminals are compatible with VT100, VT52, or ADM-3A, at
+the simple clear-screen and cursor-move level used by the game. Here
+are some examples:
+
+CP/M emulators          VT100 or VT52 (mostly)
+
+Amstrad CPC/PCW         VT52
+Bondwell 2              ADM-3A
+Commodore 128           ADM-3A
+DEC Rainbow             VT100
+Heathkit/Zenith         VT52
+Kaypro                  ADM-3A
+MSX                     VT52
+Osborne                 ADM-3A
+Sinclair Spectrum +3    VT52
+Xerox 820               ADM-3A
+
+The Apple II with SoftCard should partly work with ADM-3A; the
+clear-screen code used will probably fail.
+
+The TRS-80 situation is complicated due to the various models and CP/M
+versions, but most should work or partly work with ADM-3A or VT52.
+
+For ZCN, use "zcsoli 0" on NC100 and "zcsoli 3" on NC200. Both
+effectively skip the bottom line; the NC100 case also skips a blank
+line, and crudely rearranges things to fit the screen.
+
+You can remove the onscreen instructions by following a terminal type
+with "-", e.g. "zcsoli 2-". This limits the display to 32 columns.
+
+If none of the builtin terminal types are any use, you'll have to
+patch in support for a custom terminal... and you probably need be a
+programmer to do that. But it isn't too nasty.
+
+
+Custom Terminal Patching
+------------------------
+
+Hopefully you won't need to do this - see above. But if you do, note
+that the screen/terminal being used should support at least 32 columns
+and 22 rows of text. (Using exactly 32 columns will actually require a
+minimum of 23 rows, if the cursor wraps around at EOL.) There are ways
+to cope with having fewer lines in some cases, the NC100 support shows
+one possible approach.
+
+Addresses below are locations in memory when loaded, subtract 100h for
+offsets in the COM file.
+
+0104h should be the number of columns, though there's no actual need
+to change this unless it's less than 50.
+
+0107h should be a zero byte (00h) to indicate a custom terminal patch.
+(It otherwise indicates a builtin terminal type to use - so e.g. you
+could set this to 2 to use VT52 codes by default.)
+
+0110h should be a clear-screen routine. Or you can leave it as-is and
+just change the string at 0118h, which should end with "$".
+
+0120h should be a cursor-move routine to move to column B and row C,
+with (0,0) being the top-left.
+
+All space from 0110h to 017Fh inclusive is available to patches. You
+can use BDOS calls for output, or you can call 0180h to output DE as a
+decimal number, or 0183h to output the character in A.
+
+One more thing, which isn't really to do with terminal-patching - you
+can change the filler characters used for face-up and face-down cards
+if you want (the defaults being "." and "%"). They're at 0195h and
+0196h respectively.
+
+See zcsoli.z for any further details.
+
+
+Building
+--------
+
+Feel free to skip this, prebuilt COM files are provided.
+
+If you want to reassemble from scratch, you should first make sure
+that the source files were extracted from the ZIP with "unzip -L", or
+from the LBR with "lbrate". This is to ensure that you have
+all-lowercase filenames.
+
+You'll need a Unix/Linux box or some equivalent, and zmac 1.3 which is
+available here at the time of writing:
+
+  http://ftp.nvg.ntnu.no/pub/cpc/utils/msdos/zmac.zip
+
+Or failing that, it's bundled with ZCN in the "zmac" directory:
+
+  http://www.ibiblio.org/pub/packages/zcn/zcn13.zip
+
+At least one newer fork of zmac exists, but personally I prefer 1.3.
+
+You also need awk installed, preferably GNU awk installed as gawk.
+Other awk implementations should work, but you'll need to edit
+Makefile and z8080.awk appropriately to use them.
+
+Once everything's ready, do "make spotless" in the src directory to
+remove the existing binaries, then "make" which should make the COM
+files.
+
+
+Naming
+------
+
+Yes, it's not the best name ever. I was originally going to call it
+"solitty" until I did a web search and found that the name had
+basically been used already, in an amusing way I hadn't been
+expecting. :-)
+
+
+Contacting me
+-------------
+
+You can email me at zgedneil@gmail.com.
+
+
+Share and enjoy!
+
+-Rus.
+

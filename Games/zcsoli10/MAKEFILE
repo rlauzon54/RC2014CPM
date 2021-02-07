@@ -1,0 +1,41 @@
+# zcsoli - Solitaire/Patience/Klondike card game for CP/M.
+# Copyright (C) 2020 Russell Marks. See zcsoli.z for licence.
+#
+# Makefile
+
+# zmac should be zmac 1.3.
+
+# any awk should be fine, but given how errors are handled
+# in z8080.awk, GNU awk is the best option.
+AWK=gawk
+
+all: zcsoli
+
+zcsoli: zcsoli.com zcso8080.com
+
+zcsoli.com: zcsoli.z
+	zmac zcsoli.z
+	mv zcsoli.bin zcsoli.com
+
+zcso8080.com: zcsoli.z z8080.awk
+	sed 's/^for8080.*/for8080 equ 1/' <zcsoli.z | \
+	  $(AWK) -f z8080.awk >tmp.z
+	zmac -z tmp.z
+	mv tmp.bin zcso8080.com
+
+
+clean:
+	$(RM) *~ *.bin *.lst tmp.z
+
+spotless: clean
+	$(RM) zcsoli.com zcso8080.com
+
+# make zip and lbr files
+# the lar run is fiddly because lar has trouble with "../foo.lbr"
+zip: zcsoli clean
+	rm -f ../zcsoli.zip zcsoli.lbr
+	-mv ChangeLog change.log
+	zip -k ../zcsoli.zip *
+	echo 16 |lar u zcsoli.lbr copying makefile change.log *.[^l]*; echo
+	mv zcsoli.lbr ..
+	mv change.log ChangeLog

@@ -1,0 +1,1834 @@
+;zcsoli 1.0 - Solitaire/Patience/Klondike card game for CP/M.
+;Copyright (C) 2020 Russell Marks.
+;Based on my 2002 Minigame Competition entry for the Sinclair Spectrum.
+;
+;This program is free software; you can redistribute it and/or modify
+;it under the terms of the GNU General Public License as published by
+;the Free Software Foundation; either version 2 of the License, or (at
+;your option) any later version.
+;
+;This program is distributed in the hope that it will be useful, but
+;WITHOUT ANY WARRANTY; without even the implied warranty of
+;MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE.  See the GNU
+;General Public License for more details.
+;
+;You should have received a copy of the GNU General Public License
+;along with this program.  If not, see <https://www.gnu.org/licenses/>.
+
+
+;The Xorshift RNG routine is based on the C original in George
+;Marsaglia's "Xorshift RNGs", the source there also being GPL.
+
+
+;This file is both assembled directly for the Z80 version, and
+;after filtering through z8080.awk for the 8080 version.
+
+
+org 0100h
+
+;starts with cpmtris-style patch, but with termtype set to VT100.
+
+jp indirect
+
+defb 0
+
+;VT100 is default. Use "zcsoli 2" for VT52, "zcsoli 5" for ADM-3A.
+;You can change the default at 0107h below.
+;(ZCN is type 3, usable on an NC200. And VC404 is type 4, for both
+;the people in the world that care. :-))
+;
+;For other cases, you'll need to patch as below:
+
+;104h - number of columns
+; must have at least 32 columns.
+; If this is set to less than 50 columns and type is 0, the onscreen
+; instructions are not displayed. You can force this behaviour
+; from the command-line for any type by putting "-" after
+; the terminal type digit, e.g. "zcsoli 2-".
+cols: defb 80
+
+;105h - number of lines
+; must have at least 22 lines
+;(unused in this game)
+lines: defb 24
+
+;106h - 10*Mhz of your Z80.
+; e.g. on a 3.5MHz Spectrum +3 it would be 35.
+; most CP/M machines have speeds around the 3 to 4 MHz mark,
+; so if you don't know the speed of your box just use 35.
+;(unused in this game)
+mhz10: defb 35
+
+;107h - terminal type
+;you can roll your own terminal routines, but there's hard-coded
+;support for a few terminals which saves you the effort. they are:
+; type 1 - VT100 (mostly for emulators/terminals, but also DEC Rainbow)
+; type 2 - VT52 (PCW, CPC, Spectrum +3, MSX, etc.)
+; type 3 - ZCN (NC200 running ZCN)
+; type 4 - VC404 (Volker Craig 404, as I happen to have a VC :-))
+; type 5 - ADM-3A (C128, Kaypro, etc.)
+;set this to zero if you're writing your own clear screen and cursor
+;move routines.
+termtype: defb 1
+
+;108h-10fh - reserved (currently unused)
+defb 0,0,0,0,0,0,0,0
+
+;the routines below are allowed to corrupt af/bc/de/hl,
+; but other registers must remain intact. You can use these routines
+; from them:
+;the routine at 180h prints the num. in de in decimal, preserving all regs.
+;the routine at 183h prints the char in a, preserving all regs.
+
+;110h - clear screen
+;this example is for an Amstrad NC100 running ZCN.
+;(This works a little oddly, as I wanted to keep the string-based
+;approach to output here.)
+hackcls:
+ld de,mcls
+ld c,9
+jp 5
+mcls: defb 1,'$'
+
+defs 0120h-$
+
+;120h - move to (x,y), where (0,0) is top-left
+;entry: (b,c)=(x,y)
+;this example is for an Amstrad NC100 running ZCN.
+;(This makes for a very strange example admittedly, as it
+;distorts the display to fit in 10 lines by removing row 1,
+;and putting rows 11+ to the right of the others. It relies
+;on ZCN forcing cursor-move rows past 9 to still be 9.)
+hackmove:
+ld a,16
+call 0183h
+ld a,c
+and a
+jp z,hmv1
+dec a
+hmv1:
+cp 10
+jp c,hmv2
+sub 10
+ld c,a
+ld a,60
+add a,b
+ld b,a
+ld a,c
+hmv2:
+add a,32
+call 0183h
+ld a,b
+add a,32
+jp 0183h	;ret via that
+
+;140h - extra patch space, in case the above isn't enough
+;all the space up to 17fh is usable
+defs 0180h-$
+
+;180h - print de as decimal number (for VT100 cursor move)
+;saves af/bc/de/hl
+jp dispdec2
+
+;183h - print char in a
+;saves all regs
+jp putchar
+
+;we jump to here first, so that the 1st jump always stays the same
+; no matter what hacking is done in future, and any binary patches
+; made by overwriting the first record still work.
+indirect:
+jp main
+
+dispdec2:
+push af
+push bc
+push de
+push hl
+call dispdec
+pop hl
+pop de
+pop bc
+pop af
+ret
+
+;these are here to give them a stable location, in case anyone
+;wants to change them. :-) They're at 195h and 196h.
+char_faceup:	defb '.'
+char_facedown:	defb '%'
+
+
+
+
+;card info is encoded in one byte as follows:
+;
+;76543210
+;xxy0zzzz
+;
+;xx = suit, 0-3 respectively hearts, diamonds, spades, clubs
+;     (so top bit doubles up as red/black bit, 1=black).
+;0 = unused
+;y = set if card is face down
+;    (not applied for cards still in the deck, the top card
+;     there is shown face down `by hand' when appropriate)
+;zzzz = value, 1-13 respectively A, 2-10, J, Q, K.
+
+;the card piles start on page boundaries, one byte per card,
+;with a zero byte as the end marker. Though the ace piles
+;are really just card slots, only storing the most-recently-placed
+;card.
+;
+;the piles in order are:
+;
+;0	deck (in bottom-to-top order)
+;1	turned-over pile next to deck (ditto)
+;2-8	the main piles
+;9-12	the ace piles
+
+;could rearrange this but really, it's simpler to just stick it
+;at a known place. 6k of data/stack starting at 4k isn't exactly much.
+;after 2k of old/newscreen, piledata is 13*256=3328 bytes, the rest is
+;a rather generous stack.
+;
+;the 'screens' let us compare old with new for updates on a per-line
+;basis, without having to rewrite the old speccy code which assumed
+;high-speed output with no visible cursor.
+;
+oldscreen	equ 01000h	;allow 1k for screens (they're a bit smaller)
+newscreen	equ 01400h
+piledata	equ 01800h
+stack		equ 16*256+piledata
+
+fcb		equ 05ch
+
+
+;vcurxy/vcury/vcurx must be together and in this order
+vcurxy:
+vcury:		defb 0
+vcurx:		defb 0
+
+oldsp:		defw 0
+
+
+;this constant is modified to 1 by Makefile for 8080 version.
+for8080		equ 0
+
+if for8080=0
+m8080:		defb 'Needs Z80, try zcso8080.$'
+endif
+
+main:
+if for8080=0
+ld de,m8080
+ld c,9
+sub a
+jp pe,5		;ret via that if Z80 ver is on 8080
+endif
+
+ld hl,0
+add hl,sp
+ld (oldsp),hl
+
+;check TPA and set stack
+ld a,(7)
+cp stack/256
+ret c		;unlikely to be <10k so don't bother with a message
+ld hl,stack
+ld sp,hl
+
+call chkargs
+
+;fiddle RNG seed using R, if on Z80
+call badsrand
+
+;wait for key, perturb RNG based on time taken
+call btrsrand
+
+
+restart:
+call cls
+
+;removed "shuffling" message, it's way faster in this version.
+
+call initpiles
+call fillpiles
+
+call initscrn
+
+;main game loop
+mainloop:
+;if any cards at the top of piles are face down, turn them up
+call faceup
+
+;do display
+call drawpiles
+
+;update actual screen
+call refresh
+
+;see if they've won - all the ace slots will contain kings if so.
+ld hl,piledata+9*256
+ld bc,0400h
+acechklp:
+ld a,(hl)
+and 15
+cp 13
+jr nz,acechk1
+inc c
+acechk1:
+inc h
+djnz acechklp
+
+ld a,c
+cp 4
+jp z,gamewon
+
+;get command key. ctrl-r to restart, enter to turn over a card,
+;or a `source' location specifying a card/run to move somewhere.
+;Possible source location keys are 1-7 or D.
+keyloop:
+call getch
+call tolower
+cp 'C'-64
+jp z,exit	;exit on ^C
+cp 'R'-64
+jr z,restart
+cp 'L'-64
+jr z,keycl
+call iskey1to7
+jr c,do_move
+cp 'd'
+jr z,do_move
+cp 13
+jr nz,keyloop
+
+;they pressed enter - turn over a new card.
+;The routine deals with the empty-deck case.
+call turnover
+jr mainloop
+
+;do redraw for ^L
+keycl:
+call redraw
+jr mainloop
+
+do_move:
+;convert it to a pile number
+cp 'd'
+jr nz,do_move1
+ld a,'0'
+do_move1:
+sub '0'-1
+
+push af		;save it for later
+
+;now get destination key. If it's not valid, abort.
+call getch
+call tolower
+call iskey1to7
+jr c,do_move2
+cp 'a'
+jr z,do_move2
+
+badbeep:
+;XXX speccy one would do "a nasty beep" here
+;...but probably best to just keep quiet :-)
+jr mainloop
+
+do_move2:
+;dest key in a, src pile num still on stack.
+
+;if the dest is `a', we handle it specially...
+cp 'a'
+jr z,aces_move
+
+sub '0'-1
+ld b,a
+pop af
+
+;so a is src pile, b is dest pile. The cards we
+;compare to check this is ok are the one at the
+;base of the src pile's run (the lowest one which
+;is face-up), and the lowest card on the dest pile.
+;This even works when the turned-over pile is src,
+;due to a nice little kludge in the turnover routine. :-)
+
+;can't move from/to same pile
+cp b
+jr z,badbeep
+
+;find first face-up card, going from bottom of src pile.
+add a,piledata/256
+ld h,a
+ld l,0
+ld a,(hl)
+and a
+jr z,badbeep	;abort if src is empty
+
+;must be at least one face-up, so can just check bit 5
+chkfacelp:
+bit 5,(hl)
+inc hl
+jr nz,chkfacelp
+dec hl
+ex de,hl	;save pos of face-up card in de
+
+;now get last card on dest pile
+ld a,b
+call nextcardaddr
+ld a,l
+dec l
+and a
+jr nz,do_move3
+
+;if dest is empty, top of src run must be a king.
+ld a,(de)
+and 15
+cp 13
+jr nz,badbeep	;abort if not
+jr do_move4	;skip to the copying
+
+do_move3:
+;if dest not empty, dest card must be one higher,
+;and must have opposite colour.
+;(colour is effectively in top bit)
+ld a,(de)
+xor (hl)
+and 128
+jr z,badbeep	;abort if colours are the same
+
+ld a,(de)
+and 15
+ld b,a
+ld a,(hl)	;dest
+and 15
+dec a
+cp b
+jr nz,badbeep	;abort if not one higher
+
+do_move4:
+;if we got this far, it's ok to do the move.
+;first, copy the cards across.
+ex de,hl
+inc e
+
+;now hl is src, de is dest.
+push hl
+ld bc,52	;-)
+ldir
+pop hl
+ld (hl),c	;zero
+jp mainloop
+
+
+aces_move:
+pop af		;source pile num
+
+call nextcardaddr
+ld a,l
+and a
+jr z,badbeep	;abort if no cards there
+
+dec l
+ld a,(hl)
+ex de,hl
+;get ace pile of correct suit
+rlca
+rlca
+and 3
+add a,piledata/256+9
+ld h,a
+ld l,0
+
+;check existing card (we only keep the top one for ace piles).
+;the source card value must be the next one along from that on the
+;ace pile (this works even if the ace one is currently zero :-))
+ld a,(de)	;source
+and 15
+ld b,a
+ld a,(hl)	;dest
+and 15
+inc a
+cp b
+jr nz,badbeep
+
+;finally, if it's ok, move it there.
+ld a,(de)
+ld (hl),a
+xor a
+ld (de),a
+jp mainloop
+
+
+;turn cards at bottom of turned-over and main piles face up
+faceup:
+ld bc,0801h
+faceuplp:
+push bc
+ld a,c
+call nextcardaddr
+ld a,l
+and a
+jr z,faceup1
+dec l
+res 5,(hl)
+faceup1:
+pop bc
+inc c
+djnz faceuplp
+ret
+
+
+;some stuff for when they win...
+gamewon:
+call refresh
+
+;this outputs directly
+ld bc,2*256+10
+call movecur
+ld hl,mwon
+call printstr
+
+;wait for a key before restarting
+call getch
+jp restart
+
+
+mwon: defb ' Congratulations - you won! $'
+
+msidetxt:
+;limit these to 18 chars per line to allow 50-char display (for +3 really)
+;
+;     123456789012345678
+defb '      zcsoli$'
+defb '$'
+defb '$'
+defb 'Ctrl-C - exit$'
+defb '$'
+defb 'Ctrl-R - restart$'
+defb '$'
+defb '$'
+defb 'Enter - draw card$'
+defb '$'
+defb '$'
+defb 'To move cards, do$'
+defb 'source then dest:$'
+defb '$'
+defb 'd = drawn card$'
+defb '1-7 = pile 1-7$'
+defb 'a = ace etc. piles$'
+defb 0
+
+
+;clear screen and draw all except main play area.
+initscrn:
+call cls
+
+;draw numbers on top line
+ld bc,0400h
+call vmovecur
+ld bc,0731h
+numlp:
+push bc
+ld a,c
+call vputchar
+ld a,32
+push af
+call vputchar
+pop af
+call vtwochar
+pop bc
+inc c
+djnz numlp
+
+;draw instructions etc.
+jp sidetext	;ret via that
+
+
+;called for ^L, redraw whole screen
+redraw:
+call initscrn
+
+;clear oldscreen to force redraw
+ld hl,oldscreen
+ld de,oldscreen+1
+ld bc,32*22-1
+ld (hl),32
+ldir
+
+jp refresh	;ret via that
+
+
+chkargs:
+;give usage for ? or h as 1st or 2nd char.
+;This means that all of ? h /? /h -? -h work, for example.
+;(I usually use the main FCB for this, for some odd reason.)
+ld hl,fcb+1
+ld c,(hl)
+ld b,2
+chklp:
+ld a,(hl)
+cp '?'
+jr z,usage
+cp 'H'
+jr z,usage
+inc hl
+djnz chklp
+
+ld a,c
+
+;set terminal type if 0<=a<=5
+sub 48
+ret c
+cp 6
+ret nc
+ld (termtype),a
+ret
+
+
+musage:
+if for8080
+defb 'zcso8080'
+else
+defb 'zcsoli'
+endif
+defb ' [t] 1=VT100 2=VT52 3=ZCN 4=VC404 5=ADM-3A$'
+
+
+usage:
+ld de,musage
+call printsde
+jr exit2
+
+
+exit:
+call cls
+
+exit2:
+ld hl,(oldsp)
+ld sp,hl
+ret
+
+
+;return carry set if key is in range '1' to '7'
+iskey1to7:
+cp '1'
+ccf
+ret nc
+cp '8'
+ret
+
+
+tolower:
+cp 'A'
+ret c
+cp 'Z'+1
+ret nc
+xor 020h
+ret
+
+
+
+
+;clear all piles, generate new deck, and shuffle it
+initpiles:
+;zero out piles array
+ld hl,piledata
+ld de,piledata+1
+ld bc,13*256-1
+ld (hl),l	;zero, since we know it's page-aligned
+ldir
+
+;temporarily generate new deck, offset from normal one
+ld hl,piledata+128
+ld c,4
+ipylp:
+ld a,c
+dec a
+rrca
+rrca
+ld d,a
+
+ld b,13
+ipxlp:
+ld a,b
+or d
+ld (hl),a
+inc l
+djnz ipxlp
+
+dec c
+jr nz,ipylp
+
+;now, to shuffle them, move a random card to the real deck, 52 times.
+;technically this isn't a true shuffle, but we're more interested in
+;randomness than replicating the physical act of shuffling IMHO. :-)
+ld de,piledata
+ld b,52
+shufflp:
+push bc
+push de
+
+;get random number, mod B, into A
+ld a,b
+call rand_mod_a
+
+or 128
+ld l,a
+ld h,piledata/256
+
+;copy that card to real deck
+pop de
+
+;could do LDI on Z80, but do this instead to keep it the same on both.
+;(it also saves hacking on z8080.awk :-))
+ld a,(hl)
+ex de,hl
+ld (hl),a
+ex de,hl
+inc hl
+inc de
+
+push de
+
+;move the rest of temp. deck up
+ld d,h
+ld e,l
+dec e
+ld bc,52	;should cover it :-)
+ldir
+pop de
+
+pop bc
+djnz shufflp
+ret
+
+
+;do the initial dealing of cards to the main piles.
+fillpiles:
+ld c,7
+fppilelp:
+ld a,c
+add a,piledata/256+1
+ld h,a
+ld l,0
+
+ld b,c
+fpcardlp:
+push hl
+call cardfromdeck
+pop hl
+or 32		;face down
+ld (hl),a
+inc l
+djnz fpcardlp
+
+dec l
+res 5,(hl)	;last card is face up
+
+dec c
+jr nz,fppilelp
+ret
+
+
+;get a card from the deck
+cardfromdeck:
+xor a
+;falls through
+
+;get the last card from the end of the pile in A,
+;and remove it from the pile.
+;entry: A=pile number
+;exit:	A=card, or nc if no cards were there
+;	HL corrupt
+getlastcard:
+add a,piledata/256
+ld h,a
+ld l,0
+ld a,(hl)
+and a
+ret z		;also nc
+getlastlp:
+inc l
+ld a,(hl)
+and a
+jr nz,getlastlp
+dec l
+ld a,(hl)
+ld (hl),0
+scf
+ret
+
+
+;get address (in HL) of first free card of pile in A
+;(i.e. point just past the last card, if there is one)
+nextcardaddr:
+add a,piledata/256
+ld h,a
+ld l,0
+lcalp:
+ld a,(hl)
+and a
+ret z
+inc l
+jr lcalp
+
+
+
+;draw all piles, including deck, turned-over, and aces.
+drawpiles:
+;the deck is either face-down, or absent (no cards left)
+ld a,(piledata)
+and a
+jr z,dpiles1
+ld a,020h	;generic face-down card :-)
+dpiles1:
+ld bc,1*256+19
+call cardfull
+
+;the turned-over pile gets the last card (or none) displayed
+ld a,1
+ld bc,5*256+19
+call drawlastornone
+
+;draw main piles (2-8)
+ld b,7
+dpileslp1:
+push bc
+ld a,b
+inc a
+call drawpile
+pop bc
+djnz dpileslp1
+
+;ace piles are like turned-over, getting last card (or none) displayed
+;(though they're only zero/one card deep)
+ld bc,0409h
+dpileslp2:
+push bc
+ld a,c
+sub 8
+rlca
+rlca
+add a,13
+ld b,a
+ld a,c
+ld c,19
+call drawlastornone
+pop bc
+inc c
+djnz dpileslp2
+ret
+
+
+
+;display the Nth pile, A=N. This is only meant for the main piles;
+;the deck, turned-over, and ace piles should just be shown as the
+;top card.
+;it draws blank lines after the pile, up to the bottom of the screen.
+drawpile:
+push af
+dec a
+rlca
+rlca
+dec a
+ld b,a
+pop af
+add a,piledata/256
+ld h,a
+ld l,0
+
+ld a,(hl)
+and a
+ld c,1
+jr z,dpilelp2	;blank down if no cards
+inc c
+
+dpilelp:
+ld a,(hl)
+and a
+jr z,dpileend
+push bc
+push hl
+call cardhead
+pop hl
+pop bc
+inc l
+inc c
+jr dpilelp
+
+dpileend:
+push bc
+dec c
+ld a,l
+and a
+call nz,cardfull2
+pop bc
+inc c
+;now fill down with blanks until line 21
+dpilelp2:
+inc c
+ld a,c
+cp 22
+ret nc
+push bc
+call vmovecur
+ld a,32
+call vtwochar
+pop bc
+jr dpilelp2
+
+
+drawlastornone:
+call nextcardaddr
+xor a
+cp l
+jr z,cardfull
+dec l
+ld a,(hl)
+;falls through
+
+;draw a full card.
+;entry: a=card, (b,c)=location to draw it at
+cardfull:
+push af
+push bc
+call cardhead
+pop bc
+pop af
+
+cardfull2:	;used from drawpile
+lasthdrcard equ lhcop+1
+lhcop: ld a,0	;modified
+bit 5,a
+jr nz,cardfull3
+
+call cfdoline
+;and again
+cfdoline:
+inc c
+ld a,c
+cp 22		;XXX maybe go further down on non-speccy? :-)
+ret nc
+push bc
+call vmovecur
+pop bc
+ld a,(card_attr)
+call vputchar
+ld a,(card_attr)
+jp vputchar	;ret via that
+
+cardfull3:
+;card is face-down
+inc c
+push bc
+call vmovecur
+ld a,(card_attr)
+call vputchar
+ld a,(card_attr)
+call vputchar
+pop bc
+inc c
+call vmovecur
+ld a,(card_attr)
+call vputchar
+ld a,(card_attr)
+jp vputchar	;ret via that
+
+
+;emulate speccy attrs approach for card drawing;
+;it was excessively awkward to replicate without this.
+card_attr: defb 32
+
+
+
+;show the `head' of a card, enough to see what value and suit it is.
+;This is all that's visible of a card not at the top of a pile.
+;
+;entry: a=card, (b,c)=location to draw it at
+cardhead:
+ld (lasthdrcard),a
+push af
+ld a,(char_faceup)
+ld (card_attr),a
+call vmovecur
+pop af
+
+and a
+jr z,chnocard
+
+bit 5,a
+jr z,chfaceup
+
+;face down
+ld a,(char_facedown)
+ld (card_attr),a
+call vputchar
+ld a,(char_facedown)
+jp vputchar	;ret via that
+
+chnocard:
+;no card, just a space
+ld a,32
+ld (card_attr),a
+vtwochar:
+push af
+call vputchar
+pop af
+jp vputchar	;ret via that
+
+chfaceup:
+;show value
+push af
+and 15
+ld hl,valuetbl-1
+ld e,a
+ld d,0
+add hl,de
+ld a,(hl)
+call vputchar
+pop af
+
+;show suit
+rlca
+rlca
+and 3
+ld l,a
+ld h,0
+ld de,suitchars
+add hl,de
+ld a,(hl)
+jp vputchar	;ret via that
+
+suitchars: defb 'HDsc'
+
+
+;turn over a card, i.e. move one from the deck to the turned-over pile.
+;If the deck is empty when this is called, it moves the turned-over
+;pile to the deck (in reverse order, to simulate turning the cards
+;back over again), then turns over a card. Or, if no cards are left,
+;it just returns.
+turnover:
+;see if the deck is empty
+ld a,(piledata)
+and a
+jr nz,tonotempty
+
+;see if turned-over pile is empty
+ld a,(piledata+256)
+and a
+ret z		;we're done if so
+
+;if not, move turned-over pile to deck in reverse order.
+ld a,1
+call nextcardaddr
+
+;hl points past last card in turned-over pile
+ld de,piledata
+tofliplp:
+dec l
+ld a,(hl)
+and 0cfh	;clear face-down bit
+ld (de),a
+inc e
+ld a,l
+and a
+jr nz,tofliplp
+
+ld (de),a	;a is zero
+ld (piledata+256),a
+
+tonotempty:
+;turn over a card. By this point we know the deck has one or more cards.
+xor a
+call nextcardaddr
+dec l
+ld a,(hl)
+ld (hl),0
+push af
+ld a,1
+call nextcardaddr
+ld a,l
+and a
+jr z,tonot1
+;we pretend previously turned-over cards are face-down, to make
+;the card-move code slightly easier.
+dec l
+set 5,(hl)
+inc l
+tonot1:
+pop af
+ld (hl),a
+inc l
+ld (hl),0
+ret
+
+
+sidetext:
+;don't do it if "-" is 2nd char on command-line
+ld a,(fcb+2)
+cp '-'
+ret z
+
+;also skip if using custom terminal type and have <50 cols
+ld a,(termtype)
+and a
+jr nz,sidet2
+
+ld a,(cols)
+cp 50
+ret c
+
+sidet2:
+ld hl,msidetxt
+ld bc,2000h	;print starting at 32,0
+
+sidetlp:
+ld a,(hl)
+and a
+ret z
+
+push hl
+
+;look for next '$'
+sidetlp2:
+ld a,(hl)
+inc hl
+cp '$'
+jr nz,sidetlp2
+
+ex (sp),hl	;HL=old pos, leaving new pos on stack
+push bc
+push hl
+call movecur
+pop hl
+call printstr
+pop bc
+
+pop hl		;new pos
+inc c
+jr sidetlp
+
+
+
+;the built-in terminal support
+cls:
+;also clear the old/new internal 'screens'
+ld hl,oldscreen
+ld de,oldscreen+1
+ld bc,32*22-1
+push bc
+ld (hl),32
+ldir
+
+ld hl,newscreen
+ld de,newscreen+1
+pop bc
+ld (hl),32
+ldir
+
+ld a,(termtype)
+and a
+jp z,hackcls
+
+cp 1
+jr nz,cls2
+
+;VT100
+ld de,mclsvt100
+jp printsde
+
+mclsvt100: defb 27,'[H',27,'[J$'
+
+cls2:
+cp 2
+jr nz,cls3
+
+;VT52
+ld de,mclsvt52
+jp printsde
+
+mclsvt52: defb 27,'H',27,'J$'
+
+cls3:
+cp 3
+jr nz,cls4
+
+;ZCN
+ld a,1
+jp putchar
+
+cls4:
+cp 4
+jr nz,cls5
+
+;VC404
+ld a,24
+jp putchar
+
+cls5:
+cp 5
+ret nz
+
+;ADM-3A
+ld a,26
+jp putchar
+
+
+;move text cursor to (x,y), b=x, c=y
+movecur:
+ld a,(termtype)
+and a
+jp z,hackmove
+
+cp 1
+jr nz,move2
+
+;VT100
+ld a,27
+call putchar
+ld a,'['
+call putchar
+ld e,c
+inc e
+ld d,0
+call dispdec2
+ld a,';'
+call putchar
+ld e,b
+inc e
+;d still 0
+call dispdec2
+ld a,'H'
+jp putchar
+
+move2:
+cp 2
+jr nz,move3
+
+;VT52
+ld a,27
+call putchar
+ld a,'Y'
+jr moveend
+
+move3:
+cp 5
+jr nz,move4
+
+;ADM-3A
+ld a,27
+call putchar
+ld a,'='
+jr moveend
+
+move4:
+;>=6 is no good
+cp 6
+ret nc
+
+;otherwise it's 3 or 4.
+
+;ZCN and VC404
+ld a,16
+moveend:
+call putchar
+ld a,32
+add a,c
+call putchar
+ld a,32
+add a,b
+jp putchar
+
+
+
+;print string at HL (ending in $)
+printstr:
+ex de,hl
+printsde:	;same for DE :-)
+ld c,9
+jp 5		;ret via BDOS
+
+
+;get random number between 0 and A-1 inclusive
+;entry: a=as above
+;exit:	a=random number
+;f/de corrupt, bc/hl preserved
+rand_mod_a:
+push bc
+push hl
+
+ld h,0
+ld l,a
+call rand
+ld a,l
+
+pop hl
+pop bc
+ret
+
+
+;putchar - put char in a
+putchar:
+;preserves all regs
+putbyte:
+push af
+push bc
+push de
+push hl
+ld e,a
+ld c,2
+call 5
+pop hl
+pop de
+pop bc
+pop af
+ret
+
+
+;getchar - get char into a (without echo)
+;preserves all but f
+getch:		;same
+getchar:
+push bc
+push de
+push hl
+getchlp:
+ld e,0ffh
+ld c,6
+call 5
+;retry if no key
+and a
+jr z,getchlp
+pop hl
+pop de
+pop bc
+ret
+
+
+;NB: vmovecur/vputchar do no range-checking at all,
+;but it should be unnecessary as the code was tested
+;a fair bit on the speccy version.
+;(any possible overrun couldn't reach higher than
+;newscreen+32*256 anyway, which is well under 16k so
+;there's no real danger of e.g. trashing the OS)
+vmovecur:
+ld (vcurxy),bc
+ret
+
+vputchar:
+push de
+push hl
+push af
+ld hl,(vcurxy)
+ld a,h
+inc h
+ld (vcurxy),hl
+ld h,0
+ld d,h
+add hl,hl
+add hl,hl
+add hl,hl
+add hl,hl
+add hl,hl	;y*32
+ld e,a
+add hl,de	;y*32+x (x being pre-incr)
+ld de,newscreen
+add hl,de	;newscreen+y*32+x
+pop af
+ld (hl),a
+pop hl
+pop de
+ret
+
+
+;do differential update of actual screen based
+;on text at oldscreen/newscreen, and copy new to old.
+refresh:
+;screen size for this is hardcoded 32x22,
+;checked on a per-line basis only.
+ld hl,newscreen
+ld de,oldscreen
+ld bc,22
+refylp:
+push bc
+ld bc,32*256	;B=32, C=0
+refxlp:
+;this always does a full line compare, to keep the
+;comparison timing more consistent and to allow us to
+;copy new to old as we go.
+ld a,(de)
+cp (hl)
+jr z,refskip
+ld a,(hl)
+ld (de),a
+inc c
+refskip:
+inc hl
+inc de
+djnz refxlp
+
+;so C is nonzero if we need an update on this line.
+ld a,c
+and a
+pop bc
+call nz,refdoline
+
+inc b
+dec c
+jr nz,refylp
+
+;move cursor to end of the screen data
+;(just to give it a fixed position)
+ld bc,32*256+21
+jp movecur	;ret via that
+
+
+;do line B from line data *before* HL.
+;bc/de/hl preserved
+refdoline:
+push bc
+push de
+
+push hl
+ld c,b
+ld b,0
+call movecur
+pop hl
+ld de,-32
+add hl,de	;HL-=32
+
+ld b,32
+refdolp:
+push bc
+push hl
+ld e,(hl)
+ld c,2
+call 5
+pop hl
+pop bc
+inc hl
+djnz refdolp
+
+pop de
+pop bc
+ret
+
+
+;Converted from C version in George Marsaglia's "Xorshift RNGs":
+;  https://www.jstatsoft.org/article/view/v008i14
+;Licence for code listed there as GPL 2 or 3.
+;
+;This was as effectively linked from:
+;  https://en.wikipedia.org/wiki/Xorshift
+;So try there when the link inevitably breaks. :-)
+;
+;C original was, allowing for presumed typo:
+; unsigned long xor(){
+; static unsigned long y=2463534242;
+; y^=(y<<13); y^=(y>>17); return (y^=(y<<5)); }
+;
+;Given the 32-bit approach this will be a lot slower than many Z80
+;RNGs, but it's arguably a fair compromise between speed and
+;randomness. A 16-bit-only version is much easier of course (and not hard
+;to find online), but presumably repeats after 65535 iterations at most.
+;
+;It's important that the seed is never all-zeroes, so watch out for
+;that when setting/adjusting it. This also suggests that you shouldn't
+;really use all 32 bits, otherwise you'll never get a zero... :-)
+;
+;I'm guessing that the middle 16 bits are best to use.
+
+seed: defw 08ca2h,092d6h
+
+
+;rand16 - returns 16-bit random number in HL
+;this probably takes five times as long as your average
+;Z80 fast-random-number routine, but it should give better
+;randomness.
+;(Verified to give same results as C version above over 64k
+;iterations from default seed, so hopefully equivalent. :-))
+;AF/BC/DE corrupt
+rand16:
+;y<<13
+;lose the top byte, move others up, then rotate left
+;5 times. Helpfully gives us this option using A/HL:
+ld hl,(seed)
+ld a,(seed+2)
+ld d,a		;save (seed+1) in DE
+ld e,h
+add hl,hl
+rla
+add hl,hl
+rla
+add hl,hl
+rla
+add hl,hl
+rla
+add hl,hl
+rla
+ld c,a		;save A for the last xor
+;xor (seed+1) in DE with HL
+ld a,h
+xor d
+ld d,a
+ld a,l
+xor e
+ld e,a
+ld (seed+1),de
+;xor top byte with H
+ld hl,seed+3
+ld a,(hl)
+xor c
+ld (hl),a
+
+;y>>17
+;16 done by just using the top word
+;(seed+2) is still in A,D
+ld b,a		;save (seed+2) in BC for next bit
+ld c,d
+;1 more
+;carry still clear from xor above
+rra
+rr d
+ld hl,(seed)
+xor h
+ld h,a
+ld a,l
+xor d
+ld l,a
+ld (seed),hl
+
+;y<<5
+;alas for this one we really do need 32-bit.
+;(seed) still in hl
+ld d,b
+ld e,c		;DE=(seed+2) from above
+add hl,hl
+rl e
+rl d
+add hl,hl
+rl e
+rl d
+add hl,hl
+rl e
+rl d
+add hl,hl
+rl e
+rl d
+add hl,hl
+rl e
+rl d
+;xor words in turn using bc
+;bc is still (seed+2)
+ld a,b
+xor d
+ld b,a
+ld a,c
+xor e
+ld c,a
+ld (seed+2),bc
+ld d,c		;save (seed+2) for return
+ld bc,(seed)
+ld a,b
+xor h
+ld b,a
+ld a,c
+xor l
+ld c,a
+ld (seed),bc
+
+;returns middle 16 bits, but obviously you can use seed to get
+;the full 32 bits if you really want it.
+ld h,d
+ld l,b
+ret
+
+
+;alter random number seed using R
+;(doesn't modify low byte, to ensure seed stays nonzero)
+;NB: this only gives 128 possible RNG sequences, if that.
+;entry: none, exit: none
+;AF/HL corrupt
+badsrand:
+;the difference in R will be basically constant unless we
+;get an interrupt, so don't think this is doing better than
+;128-sequences-if-that just because it reads R 3 times.
+if for8080=0
+ld hl,seed+1
+ld b,3
+badsrlp:
+defb 0edh,05fh	;ld a,r - need to hide it from z8080 :-)
+xor (hl)
+ld (hl),a
+inc hl
+djnz badsrlp
+endif
+ret
+
+
+;I say why this is done, lest users think it stupid. :-)
+mwaitkey:
+defb 13,10,'To improve randomness, press a key to start: $'
+
+;prompt for keypress, while running counter and RNG,
+;then perturb RNG seed with counter.
+btrsrand:
+ld de,mwaitkey
+call printsde
+
+ld hl,0
+wklp:
+inc hl
+push hl
+call rand16
+ld e,0ffh
+ld c,6
+call 5
+pop hl
+and a
+jr z,wklp
+
+;modify part of seed
+ex de,hl
+ld hl,(seed+1)
+ld a,h
+xor d
+ld h,a
+ld a,l
+xor e
+ld l,a
+ld (seed+1),hl
+ret
+
+
+;get random number in range 0 to hl-1 inclusive
+;entry:	hl=range size
+;exit:	hl=random number in range 0 to range_size-1
+;af/bc/de corrupt
+;this is equivalent to 'rand()%range_size' in C; the Linux 'rand'
+;man page suggests this alternative if you need a better distribution,
+;which may be a good idea for numbers bigger than a few thousand:
+;
+; >        To  ensure  a  good distribution for a subrange of values,
+; >        use code like the below:
+; >             i = RAND_MAX / my_range
+; >             i *= my_range
+; >             while ((j = rand()) >= i) continue;
+; >             return j % i;
+; >        (code example based on code from Karl Lehenbauer's fortune
+; >        cookie  program,  which  credits  Ken Arnold, Unix Review,
+; >        October 1987).
+;
+;replace rand() above with a call to rand16, and RAND_MAX with FFFFh.
+;there are multiply/divide/mod routines in maths.z. Note that using the
+;above algorithm will be significantly slower than calling this
+;routine, probably half the speed at best.
+rand:
+push hl
+call rand16
+pop de
+call divide
+ex de,hl
+ret
+
+
+;divide
+;gives z1=x/y and z2=x mod y
+;entry: hl=x, de=y
+;exit:  hl=z1 (result), de=z2 (remainder)
+;af/bc corrupt
+;(switched to a non-undocumented-opcode-using version)
+divtmp: defw 0
+divide:
+ld b,h
+ld c,l
+;see if we're trying to divide by zero
+ld a,d
+or e
+ret z
+
+if for8080
+
+ld hl,0
+ld (divtmp),hl
+ld a,16
+
+dvlp:
+push af
+add hl,hl
+
+push hl
+ld hl,(divtmp)
+add hl,hl
+ld (divtmp),hl
+pop hl
+
+ld a,b
+and 080h
+jp z,dvs1
+
+ld a,1
+or l
+ld l,a
+
+dvs1:
+push hl
+and a
+
+;sbc hl,de quicker than the routine, leaves a==h
+ld a,l
+sbc a,e
+ld l,a
+ld a,h
+sbc a,d
+ld h,a
+;"jp m,dvs2" wasn't working with that -
+;cruder negative check then, top bit of h
+;a==h already
+and 080h
+jp nz,dvs2
+
+;nasty! fiddle the stack
+ex (sp),hl
+
+ld a,(divtmp)
+or 1
+ld (divtmp),a
+
+dvs2:
+pop hl
+
+and a
+ld a,c
+rla
+ld c,a
+ld a,b
+rla
+ld b,a
+
+pop af
+dec a
+jp nz,dvlp
+
+;finally! got the results.
+ex de,hl
+ld hl,(divtmp)
+
+else	;Z80 version
+
+ld (divtmp),de
+
+ld de,0
+ld hl,0
+ld a,16
+
+dvlp:
+push af
+and a
+rl l
+rl h
+
+and a
+rl e
+rl d
+
+bit 7,b
+jr z,dvs1
+
+ld a,1
+or l
+ld l,a
+
+dvs1:
+push hl
+and a
+push de
+ld de,(divtmp)
+sbc hl,de
+pop de
+jp m,dvs2
+
+;nasty! fiddle the stack
+ex (sp),hl
+
+ld a,1
+or e
+ld e,a
+
+dvs2:
+pop hl
+
+and a
+rl c
+rl b
+
+pop af
+dec a
+jr nz,dvlp
+
+;finally! got the results.
+ex de,hl
+
+endif
+
+;exit: hl=result, de=remainder
+ret
+
+
+numtmp: defb '0000000000000000$'	;16 zeroes and '$'
+
+;convert number in de to ascii in internal buffer
+;entry: de=number
+;exit:  de=addr of number in internal buffer, '$' terminated
+itoa:
+ld b,10
+;FALLS THROUGH
+
+;call here for routine with functionality as above but with b=base
+
+;convert number in de to ascii, in given base (unsigned)
+;entry: de=number, b=base (from 2 to 36)
+;exit: af/bc/hl corrupt
+itoabase:
+ld hl,numtmp+16
+ld a,'$'
+ld (hl),a
+
+dispnlp:
+push bc
+push hl
+ex de,hl
+
+ld e,b
+ld d,0
+call divide
+
+ld a,e
+add a,48
+cp 58
+jr c,dispn1
+add a,7		;compensate for >=10
+dispn1:
+
+ex de,hl	;so de now is result of division
+pop hl
+pop bc
+dec hl
+ld (hl),a
+ld a,d
+or e
+jp nz,dispnlp
+
+ex de,hl
+ret
+
+
+;display number in de, in decimal
+dispdec:
+call itoa
+jp printsde
+
+
+valuetbl:
+defb 'A23456789TJQK'

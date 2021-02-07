@@ -47,3 +47,11 @@ The VGA serial terminal kit <https://www.tindie.com/products/maccasoft/vga-seria
 See the photo included.
 
 TERM.BAS tests all the color attributes.  This is a good little program to see if your terminal supoorts the attributes you want.
+PIGFX.BAS is a version of TERM.BAS for the PiGfx graphics card.
+
+One more note using VT100 escape sequences: screen width
+Screen width is set with the WIDTH command in BASIC.  The default width is 72.
+What that means is that if you print 73 characters, BASIC will put a carriage return/line feed after the 72nd character.
+Now, add in that BASIC considers VT100 control sequences to be characters on the "line".
+You probably want to increase the WIDTH to something more than 72 (probably around 100 - you can go up to 255) or make sure
+that you PRINT without a ";" to force a new line.

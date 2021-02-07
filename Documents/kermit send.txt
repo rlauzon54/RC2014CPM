@@ -1,0 +1,34 @@
+Linux:
+Install Kermit
+Hook a USB to TTL cable to the SECOND serial port of your RC2014.
+Plug the USB end into your linux system.
+ls /dev/ttyUSB*
+And see what port it shows up as.  We will assume that it's /dev/ttyUSB0
+
+Fire up Kermit on the linux side.
+Give these commands:
+set port /dev/ttyUSB0
+set speed 57600
+set carrier-watch off
+
+Sending files TO the RC2014:
+RC2014:
+Change to the drive you want to send the files to.
+a:kermit
+receive
+
+Linux:
+send filename
+(Note that the file name can have wild cards.)
+
+
+Receiving files from the RC2014:
+Linux:
+after starting kermit and giving the commands just give the command
+receive
+
+RC2014:
+a:kermit
+send filename
+(wild cards are allowed)
+
